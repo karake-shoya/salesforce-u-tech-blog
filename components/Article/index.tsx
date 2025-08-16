@@ -1,4 +1,4 @@
-import { formatRichText } from '@/libs/utils';
+import { formatContent } from '@/libs/utils';
 import { type Article } from '@/libs/microcms';
 import PublishedDate from '../Date';
 import styles from './index.module.css';
@@ -10,6 +10,7 @@ type Props = {
 };
 
 export default function Article({ data }: Props) {
+  const formattedContent = await formatContent(data.content, data.content_type);
   return (
     <main className={styles.main}>
       <h1 className={styles.title}>{data.title}</h1>
@@ -57,7 +58,7 @@ export default function Article({ data }: Props) {
       <div
         className={styles.content}
         dangerouslySetInnerHTML={{
-          __html: `${formatRichText(data.content)}`,
+          __html: formattedContent,
         }}
       />
       <Profile writer={data.writer} />
