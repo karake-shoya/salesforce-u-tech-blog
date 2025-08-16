@@ -48,3 +48,4 @@ export const formatContent = async (content: string, contentType: 'html' | 'mark
   } else {
     return formatRichText(content);
   }
+};

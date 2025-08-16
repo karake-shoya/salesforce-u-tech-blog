@@ -9,7 +9,7 @@ type Props = {
   data: Article;
 };
 
-export default function Article({ data }: Props) {
+export default async function Article({ data }: Props) {
   const formattedContent = await formatContent(data.content, data.content_type);
   return (
     <main className={styles.main}>
