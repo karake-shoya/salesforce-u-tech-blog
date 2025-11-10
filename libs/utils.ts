@@ -48,11 +48,13 @@ export const formatMarkdownWithHighlight = async (markdown: string) => {
 
 // マークダウン形式を自動検出
 const isMarkdown = (content: string): boolean => {
-  // HTMLタグが含まれている場合はHTMLとして処理
-  const htmlTagPattern = /<[a-z][\s\S]*>/i;
-  if (htmlTagPattern.test(content)) {
+  if (!content || content.trim().length === 0) {
     return false;
   }
+
+  // HTMLタグの有無を確認
+  const htmlTagPattern = /<[a-z][\s\S]*>/i;
+  const hasHtmlTags = htmlTagPattern.test(content);
 
   // マークダウンの特徴的な記号やパターンを検出
   const markdownPatterns = [
@@ -69,10 +71,33 @@ const isMarkdown = (content: string): boolean => {
     /_[^_]+_/, // 斜体 _text_
     /^>\s+/m, // 引用 (> で始まる)
     /^---+\s*$/m, // 水平線 (---)
+    /^\s*\|.+\|/m, // テーブル (| で始まる)
+    /^\s*\[x\]/m, // チェックボックス [x]
+    /^\s*\[ \]/m, // チェックボックス [ ]
   ];
 
-  // マークダウンのパターンが1つ以上見つかった場合はマークダウンとして判定
-  return markdownPatterns.some((pattern) => pattern.test(content));
+  // マークダウンのパターンが検出されたか
+  const hasMarkdownPatterns = markdownPatterns.some((pattern) => pattern.test(content));
+
+  // HTMLタグが含まれていても、マークダウンのパターンが強く検出された場合はマークダウンとして判定
+  // ただし、完全にHTML構造になっている場合はHTMLとして処理
+  if (hasHtmlTags) {
+    // HTMLタグがある場合、マークダウンのパターンが多く検出される場合のみマークダウンとして判定
+    // または、HTMLタグが少なく、マークダウンのパターンが検出される場合
+    const htmlTagCount = (content.match(/<[a-z][\s\S]*?>/gi) || []).length;
+    const markdownPatternCount = markdownPatterns.filter((pattern) => pattern.test(content)).length;
+    
+    // HTMLタグが少なく、マークダウンのパターンが多く検出される場合はマークダウンとして判定
+    if (htmlTagCount < 5 && markdownPatternCount >= 2) {
+      return true;
+    }
+    
+    // 通常のHTMLとして処理
+    return false;
+  }
+
+  // HTMLタグがない場合、マークダウンのパターンが1つ以上見つかった場合はマークダウンとして判定
+  return hasMarkdownPatterns;
 };
 
 export const formatContent = async (content: string, contentType?: 'html' | 'markdown') => {
@@ -85,7 +110,19 @@ export const formatContent = async (content: string, contentType?: 'html' | 'mar
   }
 
   // content_typeが未指定の場合は自動検出
-  if (isMarkdown(content)) {
+  const detectedAsMarkdown = isMarkdown(content);
+  
+  // 開発環境でデバッグログを出力（本番環境では無効化）
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[formatContent] Content type detection:', {
+      contentType,
+      detectedAsMarkdown,
+      contentPreview: content.substring(0, 200),
+      hasHtmlTags: /<[a-z][\s\S]*>/i.test(content),
+    });
+  }
+
+  if (detectedAsMarkdown) {
     return await formatMarkdownWithHighlight(content);
   }
 
