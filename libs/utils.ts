@@ -44,6 +44,14 @@ export const formatRichText = (richText: string) => {
     // highlight.js用のクラスを追加
     $(elm).addClass('hljs');
   });
+  // 画像タグにスタイルを適用
+  $('img').each((_, elm) => {
+    const $img = $(elm);
+    // 既にfigureで囲まれていない場合、max-widthを設定
+    if (!$img.parent('figure').length) {
+      $img.attr('style', 'max-width: 100%; height: auto;');
+    }
+  });
   return $.html();
 };
 
