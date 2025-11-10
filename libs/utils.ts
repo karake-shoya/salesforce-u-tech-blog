@@ -16,15 +16,19 @@ export const formatRichText = (richText: string) => {
   const highlight = (text: string, lang?: string) => {
     if (!lang) return hljs.highlightAuto(text);
     try {
-      return hljs.highlight(text, { language: lang?.replace(/^language-/, '') || '' });
+      // language-xxx形式のクラス名から言語名を抽出
+      const language = lang.replace(/^language-/, '').split(/\s+/)[0];
+      return hljs.highlight(text, { language });
     } catch (e) {
       return hljs.highlightAuto(text);
     }
   };
   $('pre code').each((_, elm) => {
-    const lang = $(elm).attr('class');
+    const lang = $(elm).attr('class') || '';
     const res = highlight($(elm).text(), lang);
     $(elm).html(res.value);
+    // highlight.js用のクラスを追加
+    $(elm).addClass('hljs');
   });
   return $.html();
 };
@@ -32,7 +36,7 @@ export const formatRichText = (richText: string) => {
 export const formatMarkdown = async (markdown: string) => {
   const processedContent = await remark()
     .use(remarkGfm)
-    .use(remarkHtml, { sanitize: false })
+    .use(remarkHtml)
     .process(markdown);
   return processedContent.toString();
 };
