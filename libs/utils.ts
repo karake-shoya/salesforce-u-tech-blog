@@ -7,6 +7,20 @@ import { remark } from 'remark';
 import remarkHtml from 'remark-html';
 import remarkGfm from 'remark-gfm';
 
+// 型定義
+type ContentType = 'html' | 'markdown' | string | string[] | undefined;
+
+// 定数定義
+const HTML_TAG_PATTERN = /<[a-z][\s\S]*>/i;
+const HTML_TAG_COUNT_PATTERN = /<[a-z][\s\S]*?>/gi;
+const HEADING_PATTERN = /^#{1,6}\s+/m;
+const LIST_PATTERN = /^\s*[-*+]\s+/m;
+const ORDERED_LIST_PATTERN = /^\s*\d+\.\s+/m;
+const MARKDOWN_DETECTION_THRESHOLD = {
+  MAX_HTML_TAGS: 5,
+  MIN_MARKDOWN_PATTERNS: 2,
+};
+
 export const formatDate = (date: string) => {
   return formatInTimeZone(new Date(date), 'Asia/Tokyo', 'd MMMM, yyyy');
 };
@@ -46,119 +60,115 @@ export const formatMarkdownWithHighlight = async (markdown: string) => {
   return formatRichText(html);
 };
 
+// マークダウンのパターン定義
+const MARKDOWN_PATTERNS = [
+  HEADING_PATTERN, // 見出し (# で始まる)
+  LIST_PATTERN, // リスト (- や * で始まる)
+  ORDERED_LIST_PATTERN, // 番号付きリスト
+  /```[\s\S]*?```/, // コードブロック
+  /`[^`]+`/, // インラインコード
+  /\[([^\]]+)\]\(([^)]+)\)/, // リンク [text](url)
+  /!\[([^\]]*)\]\(([^)]+)\)/, // 画像 ![alt](url)
+  /\*\*[^*]+\*\*/, // 太字 **text**
+  /\*[^*]+\*/, // 斜体 *text*
+  /_{2}[^_]+_{2}/, // 太字 __text__
+  /_[^_]+_/, // 斜体 _text_
+  /^>\s+/m, // 引用 (> で始まる)
+  /^---+\s*$/m, // 水平線 (---)
+  /^\s*\|.+\|/m, // テーブル (| で始まる)
+  /^\s*\[x\]/m, // チェックボックス [x]
+  /^\s*\[ \]/m, // チェックボックス [ ]
+] as const;
+
+// マークダウンのパターンが検出された数をカウント
+const countMarkdownPatterns = (content: string): number => {
+  return MARKDOWN_PATTERNS.filter((pattern) => pattern.test(content)).length;
+};
+
+// HTMLタグの数をカウント
+const countHtmlTags = (content: string): number => {
+  return (content.match(HTML_TAG_COUNT_PATTERN) || []).length;
+};
+
+// HTMLタグが含まれているかチェック
+const hasHtmlTags = (content: string): boolean => {
+  return HTML_TAG_PATTERN.test(content);
+};
+
 // マークダウン形式を自動検出
 const isMarkdown = (content: string): boolean => {
   if (!content || content.trim().length === 0) {
     return false;
   }
 
-  // HTMLタグの有無を確認
-  const htmlTagPattern = /<[a-z][\s\S]*>/i;
-  const hasHtmlTags = htmlTagPattern.test(content);
+  const htmlTagsExist = hasHtmlTags(content);
+  const markdownPatternCount = countMarkdownPatterns(content);
 
-  // マークダウンの特徴的な記号やパターンを検出
-  const markdownPatterns = [
-    /^#{1,6}\s+/m, // 見出し (# で始まる)
-    /^\s*[-*+]\s+/m, // リスト (- や * で始まる)
-    /^\s*\d+\.\s+/m, // 番号付きリスト
-    /```[\s\S]*?```/, // コードブロック
-    /`[^`]+`/, // インラインコード
-    /\[([^\]]+)\]\(([^)]+)\)/, // リンク [text](url)
-    /!\[([^\]]*)\]\(([^)]+)\)/, // 画像 ![alt](url)
-    /\*\*[^*]+\*\*/, // 太字 **text**
-    /\*[^*]+\*/, // 斜体 *text*
-    /_{2}[^_]+_{2}/, // 太字 __text__
-    /_[^_]+_/, // 斜体 _text_
-    /^>\s+/m, // 引用 (> で始まる)
-    /^---+\s*$/m, // 水平線 (---)
-    /^\s*\|.+\|/m, // テーブル (| で始まる)
-    /^\s*\[x\]/m, // チェックボックス [x]
-    /^\s*\[ \]/m, // チェックボックス [ ]
-  ];
-
-  // マークダウンのパターンが検出されたか
-  const hasMarkdownPatterns = markdownPatterns.some((pattern) => pattern.test(content));
-
-  // HTMLタグが含まれていても、マークダウンのパターンが強く検出された場合はマークダウンとして判定
-  // ただし、完全にHTML構造になっている場合はHTMLとして処理
-  if (hasHtmlTags) {
-    // HTMLタグがある場合、マークダウンのパターンが多く検出される場合のみマークダウンとして判定
-    // または、HTMLタグが少なく、マークダウンのパターンが検出される場合
-    const htmlTagCount = (content.match(/<[a-z][\s\S]*?>/gi) || []).length;
-    const markdownPatternCount = markdownPatterns.filter((pattern) => pattern.test(content)).length;
-    
+  // HTMLタグが含まれている場合
+  if (htmlTagsExist) {
+    const htmlTagCount = countHtmlTags(content);
     // HTMLタグが少なく、マークダウンのパターンが多く検出される場合はマークダウンとして判定
-    if (htmlTagCount < 5 && markdownPatternCount >= 2) {
-      return true;
-    }
-    
-    // 通常のHTMLとして処理
-    return false;
+    return (
+      htmlTagCount < MARKDOWN_DETECTION_THRESHOLD.MAX_HTML_TAGS &&
+      markdownPatternCount >= MARKDOWN_DETECTION_THRESHOLD.MIN_MARKDOWN_PATTERNS
+    );
   }
 
   // HTMLタグがない場合、マークダウンのパターンが1つ以上見つかった場合はマークダウンとして判定
-  return hasMarkdownPatterns;
+  return markdownPatternCount > 0;
 };
 
-// HTMLに変換されたマークダウンを元のマークダウンに戻す
-const htmlToMarkdown = (html: string): string => {
-  const $ = load(html, null, false);
-  
-  // 見出しを変換 (# 見出し)
-  $('h1').each((_, elm) => {
-    $(elm).replaceWith(`# ${$(elm).text()}\n\n`);
+// HTMLからマークダウンへの変換関数群
+const convertHeadings = ($: ReturnType<typeof load>): void => {
+  const headingLevels = [1, 2, 3, 4, 5, 6] as const;
+  headingLevels.forEach((level) => {
+    $(`h${level}`).each((_, elm) => {
+      const text = $(elm).text();
+      $(elm).replaceWith(`${'#'.repeat(level)} ${text}\n\n`);
+    });
   });
-  $('h2').each((_, elm) => {
-    $(elm).replaceWith(`## ${$(elm).text()}\n\n`);
-  });
-  $('h3').each((_, elm) => {
-    $(elm).replaceWith(`### ${$(elm).text()}\n\n`);
-  });
-  $('h4').each((_, elm) => {
-    $(elm).replaceWith(`#### ${$(elm).text()}\n\n`);
-  });
-  $('h5').each((_, elm) => {
-    $(elm).replaceWith(`##### ${$(elm).text()}\n\n`);
-  });
-  $('h6').each((_, elm) => {
-    $(elm).replaceWith(`###### ${$(elm).text()}\n\n`);
-  });
-  
-  // リストを変換
+};
+
+const convertLists = ($: ReturnType<typeof load>): void => {
+  // 順序なしリスト
   $('ul li').each((_, elm) => {
     $(elm).replaceWith(`- ${$(elm).text()}\n`);
   });
+  
+  // 順序付きリスト
   $('ol li').each((_, elm) => {
     const index = $(elm).parent().children().index(elm) + 1;
     $(elm).replaceWith(`${index}. ${$(elm).text()}\n`);
   });
-  
-  // 太字を変換
+};
+
+const convertTextFormatting = ($: ReturnType<typeof load>): void => {
+  // 太字
   $('strong, b').each((_, elm) => {
     $(elm).replaceWith(`**${$(elm).text()}**`);
   });
   
-  // 斜体を変換
+  // 斜体
   $('em, i').each((_, elm) => {
     $(elm).replaceWith(`*${$(elm).text()}*`);
   });
-  
-  // リンクを変換
+};
+
+const convertLinks = ($: ReturnType<typeof load>): void => {
   $('a').each((_, elm) => {
     const href = $(elm).attr('href') || '';
     const text = $(elm).text();
     $(elm).replaceWith(`[${text}](${href})`);
   });
-  
-  // 段落を変換（改行に変換）
+};
+
+const convertParagraphs = ($: ReturnType<typeof load>): void => {
   $('p').each((_, elm) => {
-    const html = $(elm).html() || '';
-    const text = $(elm).text();
+    const text = $(elm).text().trim();
     
     // 段落内にマークダウン記号が含まれている場合（例: <p># 見出し</p>）
-    if (/^#{1,6}\s/.test(text.trim())) {
-      // 見出し記号を抽出して変換
-      const headingMatch = text.trim().match(/^(#{1,6})\s+(.+)$/);
+    if (HEADING_PATTERN.test(text)) {
+      const headingMatch = text.match(/^(#{1,6})\s+(.+)$/);
       if (headingMatch) {
         const level = headingMatch[1].length;
         const content = headingMatch[2];
@@ -168,50 +178,97 @@ const htmlToMarkdown = (html: string): string => {
     }
     
     // リストのパターンが含まれている場合
-    if (/^[-*+]\s/.test(text.trim()) || /^\d+\.\s/.test(text.trim())) {
-      $(elm).replaceWith(`${text.trim()}\n\n`);
+    if (LIST_PATTERN.test(text) || ORDERED_LIST_PATTERN.test(text)) {
+      $(elm).replaceWith(`${text}\n\n`);
       return;
     }
     
     // 通常の段落
     $(elm).replaceWith(`${text}\n\n`);
   });
-  
-  // コードブロックを変換
+};
+
+const convertCodeBlocks = ($: ReturnType<typeof load>): void => {
+  // コードブロック
   $('pre code').each((_, elm) => {
     const code = $(elm).text();
     const lang = $(elm).attr('class')?.replace(/^language-/, '') || '';
     $(elm).parent().replaceWith(`\`\`\`${lang}\n${code}\n\`\`\`\n\n`);
   });
   
-  // インラインコードを変換
+  // インラインコード
   $('code').not('pre code').each((_, elm) => {
     $(elm).replaceWith(`\`${$(elm).text()}\``);
   });
-  
-  return $.text().trim();
+};
+
+// HTMLに変換されたマークダウンを元のマークダウンに戻す
+const htmlToMarkdown = (html: string): string => {
+  try {
+    const $ = load(html, null, false);
+    
+    // 変換処理を順番に実行
+    convertCodeBlocks($); // コードブロックは先に処理（他の変換の影響を受けないように）
+    convertHeadings($);
+    convertLists($);
+    convertTextFormatting($);
+    convertLinks($);
+    convertParagraphs($);
+    
+    return $.text().trim();
+  } catch (error) {
+    // エラーが発生した場合は元のHTMLを返す
+    console.error('[htmlToMarkdown] Error converting HTML to Markdown:', error);
+    return html;
+  }
+};
+
+// content_typeを正規化（配列の場合は最初の要素を使用）
+const normalizeContentType = (contentType: ContentType): string | undefined => {
+  if (Array.isArray(contentType)) {
+    return contentType[0];
+  }
+  return contentType;
+};
+
+// デバッグログを出力（開発環境のみ）
+const logContentTypeDetection = (
+  contentType: ContentType,
+  normalizedContentType: string | undefined,
+  detectedAsMarkdown: boolean,
+  content: string
+): void => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[formatContent] Content type detection:', {
+      contentType,
+      normalizedContentType,
+      detectedAsMarkdown,
+      contentPreview: content.substring(0, 200),
+      hasHtmlTags: hasHtmlTags(content),
+    });
+  }
+};
+
+// マークダウンコンテンツを処理
+const processMarkdownContent = async (content: string): Promise<string> => {
+  // HTMLに変換されている可能性があるので、マークダウンに戻してから処理
+  if (hasHtmlTags(content)) {
+    const markdown = htmlToMarkdown(content);
+    return await formatMarkdownWithHighlight(markdown);
+  }
+  // 既にマークダウン形式の場合はそのまま処理
+  return await formatMarkdownWithHighlight(content);
 };
 
 export const formatContent = async (
   content: string,
-  contentType?: 'html' | 'markdown' | string | string[]
-) => {
-  // content_typeが配列の場合、最初の要素を使用
-  const normalizedContentType = Array.isArray(contentType) 
-    ? contentType[0] 
-    : contentType;
+  contentType?: ContentType
+): Promise<string> => {
+  const normalizedContentType = normalizeContentType(contentType);
   
-  // content_typeが明示的に'markdown'と指定されている場合
+  // content_typeが明示的に指定されている場合
   if (normalizedContentType === 'markdown') {
-    // HTMLに変換されている可能性があるので、マークダウンに戻してから処理
-    const htmlTagPattern = /<[a-z][\s\S]*>/i;
-    if (htmlTagPattern.test(content)) {
-      // HTMLに変換されている場合は、マークダウンに戻してから処理
-      const markdown = htmlToMarkdown(content);
-      return await formatMarkdownWithHighlight(markdown);
-    }
-    // 既にマークダウン形式の場合はそのまま処理
-    return await formatMarkdownWithHighlight(content);
+    return await processMarkdownContent(content);
   }
   
   if (normalizedContentType === 'html') {
@@ -220,17 +277,7 @@ export const formatContent = async (
 
   // content_typeが未指定の場合は自動検出
   const detectedAsMarkdown = isMarkdown(content);
-  
-  // 開発環境でデバッグログを出力（本番環境では無効化）
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[formatContent] Content type detection:', {
-      contentType,
-      normalizedContentType,
-      detectedAsMarkdown,
-      contentPreview: content.substring(0, 200),
-      hasHtmlTags: /<[a-z][\s\S]*>/i.test(content),
-    });
-  }
+  logContentTypeDetection(contentType, normalizedContentType, detectedAsMarkdown, content);
 
   if (detectedAsMarkdown) {
     return await formatMarkdownWithHighlight(content);
