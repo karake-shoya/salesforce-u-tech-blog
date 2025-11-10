@@ -100,12 +100,121 @@ const isMarkdown = (content: string): boolean => {
   return hasMarkdownPatterns;
 };
 
-export const formatContent = async (content: string, contentType?: 'html' | 'markdown') => {
-  // content_typeが明示的に指定されている場合はそれを使用
-  if (contentType === 'markdown') {
+// HTMLに変換されたマークダウンを元のマークダウンに戻す
+const htmlToMarkdown = (html: string): string => {
+  const $ = load(html, null, false);
+  
+  // 見出しを変換 (# 見出し)
+  $('h1').each((_, elm) => {
+    $(elm).replaceWith(`# ${$(elm).text()}\n\n`);
+  });
+  $('h2').each((_, elm) => {
+    $(elm).replaceWith(`## ${$(elm).text()}\n\n`);
+  });
+  $('h3').each((_, elm) => {
+    $(elm).replaceWith(`### ${$(elm).text()}\n\n`);
+  });
+  $('h4').each((_, elm) => {
+    $(elm).replaceWith(`#### ${$(elm).text()}\n\n`);
+  });
+  $('h5').each((_, elm) => {
+    $(elm).replaceWith(`##### ${$(elm).text()}\n\n`);
+  });
+  $('h6').each((_, elm) => {
+    $(elm).replaceWith(`###### ${$(elm).text()}\n\n`);
+  });
+  
+  // リストを変換
+  $('ul li').each((_, elm) => {
+    $(elm).replaceWith(`- ${$(elm).text()}\n`);
+  });
+  $('ol li').each((_, elm) => {
+    const index = $(elm).parent().children().index(elm) + 1;
+    $(elm).replaceWith(`${index}. ${$(elm).text()}\n`);
+  });
+  
+  // 太字を変換
+  $('strong, b').each((_, elm) => {
+    $(elm).replaceWith(`**${$(elm).text()}**`);
+  });
+  
+  // 斜体を変換
+  $('em, i').each((_, elm) => {
+    $(elm).replaceWith(`*${$(elm).text()}*`);
+  });
+  
+  // リンクを変換
+  $('a').each((_, elm) => {
+    const href = $(elm).attr('href') || '';
+    const text = $(elm).text();
+    $(elm).replaceWith(`[${text}](${href})`);
+  });
+  
+  // 段落を変換（改行に変換）
+  $('p').each((_, elm) => {
+    const html = $(elm).html() || '';
+    const text = $(elm).text();
+    
+    // 段落内にマークダウン記号が含まれている場合（例: <p># 見出し</p>）
+    if (/^#{1,6}\s/.test(text.trim())) {
+      // 見出し記号を抽出して変換
+      const headingMatch = text.trim().match(/^(#{1,6})\s+(.+)$/);
+      if (headingMatch) {
+        const level = headingMatch[1].length;
+        const content = headingMatch[2];
+        $(elm).replaceWith(`${'#'.repeat(level)} ${content}\n\n`);
+        return;
+      }
+    }
+    
+    // リストのパターンが含まれている場合
+    if (/^[-*+]\s/.test(text.trim()) || /^\d+\.\s/.test(text.trim())) {
+      $(elm).replaceWith(`${text.trim()}\n\n`);
+      return;
+    }
+    
+    // 通常の段落
+    $(elm).replaceWith(`${text}\n\n`);
+  });
+  
+  // コードブロックを変換
+  $('pre code').each((_, elm) => {
+    const code = $(elm).text();
+    const lang = $(elm).attr('class')?.replace(/^language-/, '') || '';
+    $(elm).parent().replaceWith(`\`\`\`${lang}\n${code}\n\`\`\`\n\n`);
+  });
+  
+  // インラインコードを変換
+  $('code').not('pre code').each((_, elm) => {
+    $(elm).replaceWith(`\`${$(elm).text()}\``);
+  });
+  
+  return $.text().trim();
+};
+
+export const formatContent = async (
+  content: string,
+  contentType?: 'html' | 'markdown' | string | string[]
+) => {
+  // content_typeが配列の場合、最初の要素を使用
+  const normalizedContentType = Array.isArray(contentType) 
+    ? contentType[0] 
+    : contentType;
+  
+  // content_typeが明示的に'markdown'と指定されている場合
+  if (normalizedContentType === 'markdown') {
+    // HTMLに変換されている可能性があるので、マークダウンに戻してから処理
+    const htmlTagPattern = /<[a-z][\s\S]*>/i;
+    if (htmlTagPattern.test(content)) {
+      // HTMLに変換されている場合は、マークダウンに戻してから処理
+      const markdown = htmlToMarkdown(content);
+      return await formatMarkdownWithHighlight(markdown);
+    }
+    // 既にマークダウン形式の場合はそのまま処理
     return await formatMarkdownWithHighlight(content);
   }
-  if (contentType === 'html') {
+  
+  if (normalizedContentType === 'html') {
     return formatRichText(content);
   }
 
@@ -116,6 +225,7 @@ export const formatContent = async (content: string, contentType?: 'html' | 'mar
   if (process.env.NODE_ENV === 'development') {
     console.log('[formatContent] Content type detection:', {
       contentType,
+      normalizedContentType,
       detectedAsMarkdown,
       contentPreview: content.substring(0, 200),
       hasHtmlTags: /<[a-z][\s\S]*>/i.test(content),
